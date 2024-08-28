@@ -14,8 +14,12 @@ const exerciseSchema = mongoose.Schema({
   date: Date,
 })
 
+
 const userSchema = mongoose.Schema({
-  username: String
+  username: {
+    type: String,
+    unique: true
+  }
 })
 
 const logSchema = mongoose.Schema({
@@ -24,7 +28,7 @@ const logSchema = mongoose.Schema({
   log: [{
     description: String,
     duration: Number,
-    date: Date
+    date: String
   }]
 })
 
@@ -56,16 +60,20 @@ app
     const { username } = req.body;
     try {
       const resout = await User.create({ username })
+      console.log("post: /api/users");
       res.json(resout)
     } catch (error) {
+      console.log("post: err /api/users");
       res.json({ error })
     }
   })
   .get(async (req, res) => {
     try {
       const allUsers = await User.find();
+      console.log("get: /api/users");
       res.json(allUsers)
     } catch (error) {
+      console.log("get: err /api/users");
       res.json({ error })
     }
   })
@@ -73,30 +81,98 @@ app
 app
   .route("/api/users/:_id/exercises")
   .post(async (req, res) => {
-    const { description, duration, date = new Date().toUTCString() } = req.body;
+    const { description, duration, date = new Date().toDateString() } = req.body;
     const { _id } = req.params;
+
+    console.log(description, duration, date, _id);
+
 
     try {
       const user = await User.find({ _id })
-      const exercise = await Exercise.create({ username: user.username, description, duration, date });
-      const logs = await Log.findById(user._id, (err, data) => {
-        if (data.length <= 0) {
-          Log.create({ username: user.username, count: 1, log: [{ description: exercise.description, duration: exercise.duration }] })
-        } else {
-          Log.findByIdAndUpdate(_id, { $in: { count: count + 1 }, log: Array.push({ description: exercise.description, duration: exercise.duration }) })
-        }
-      })
-      res.json({user: exercise});
+      const exercise = await Exercise.create({ username: user[0].username, description, duration, date });
+      // console.log("date", date, "username", user[0].username, "exercise", exercise);
+
+      const logs = await Log.find({ username: user[0].username })
+      // console.log(logs);
+
+      if (logs.length <= 0) {
+        const createLog = await Log.create({ username: user[0].username, count: 1, log: [{ description: exercise.description, duration: exercise.duration, date }] })
+        console.log("post: /api/users/:_id/exercises");
+        res.json({ exercise });
+      }
+
+      if (logs.length >= 1) {
+        const updateLog = await Log.findOneAndUpdate({ username: user[0].username },
+          {
+            $inc: { count: 1 },
+            $push: {
+              log: {
+                description: exercise.description, duration: exercise.duration, date
+              }
+            }
+          }, { new: true }
+        )
+        console.log("update: exer added to log");
+        console.log("post: update log /api/users/:_id/exercises");
+        res.json({ user: exercise });
+      }
+
+
+      // let newx = JSON.parse(exercise)
+      // let newExercise = { ex: newx, date: new Date(exercise.date).toDateString() };
+      // console.log("new date", newExercise);
+
     } catch (error) {
-      res.json({ error });
+      console.log("post: err /api/users/:_id/exercises");
+      res.json({ error: "data not added" });
     }
   })
 
 app.get("/api/users/:_id/logs", async (req, res) => {
   const { _id } = req.params;
+  function formatDate(date = new Date()) {
+    const year = date.toLocaleString('default', { year: 'numeric' });
+    const month = date.toLocaleString('default', { month: '2-digit' });
+    const day = date.toLocaleString('default', { day: '2-digit' });
+    return [year, month, day].join('-');
+  }
+
+  let { from = "1990-01-01", to=formatDate(new Date()), limit } = req.query;
+
+  console.log(_id);
+
   try {
-    const logs = await Log.find({ _id });
-    res.json(logs)
+    // console.log(news)
+    from = new Date(from).toISOString();
+    to = new Date(to).toISOString();
+    const user = await User.find({ _id })
+    // use this for date
+    // date: {
+    // $gte: ISODate("2023-01-01T00:00:00.000Z"),
+    // $lte: ISODate("2023-12-31T23:59:59.999Z")
+    // }
+
+    const logs = await Log.find({
+      username: user[0].username, date: {
+        $gte: ISODate(from),
+        $lte: ISODate(to)
+      }
+    }).limit(limit);
+    console.log("get: /api/users/:_id/logs");
+
+    res.json({ count: logs[0].count, log: logs[0].log })
+  } catch (error) {
+    console.log("get: err /api/users/:_id/logs");
+    res.json({ error })
+  }
+})
+
+app.post("/api/del", async (req, res) => {
+  try {
+    const delu = await User.deleteMany()
+    const delex = await Exercise.deleteMany();
+    const dellog = await Log.deleteMany();
+    res.json({ delu, delex, dellog })
   } catch (error) {
     res.json({ error })
   }
