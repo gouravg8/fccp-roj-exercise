@@ -11,7 +11,10 @@ const exerciseSchema = mongoose.Schema({
   username: String,
   description: String,
   duration: Number,
-  date: Date,
+  date: {
+    type: Date,
+    default: Date.now()
+  },
 })
 
 
@@ -28,7 +31,10 @@ const logSchema = mongoose.Schema({
   log: [{
     description: String,
     duration: Number,
-    date: String
+    date: {
+      type: Date,
+      default: Date.now()
+    }
   }]
 })
 
@@ -81,10 +87,12 @@ app
 app
   .route("/api/users/:_id/exercises")
   .post(async (req, res) => {
-    const { description, duration, date = new Date().toDateString() } = req.body;
-    const { _id } = req.params;
+    let { description, duration, date = new Date().toISOString() } = req.body;
 
-    console.log(description, duration, date, _id);
+    const { _id } = req.params;
+    date = new Date(date).toISOString();
+
+    console.log('desc', description, 'dur', duration, date, _id);
 
 
     try {
@@ -98,7 +106,7 @@ app
       if (logs.length <= 0) {
         const createLog = await Log.create({ username: user[0].username, count: 1, log: [{ description: exercise.description, duration: exercise.duration, date }] })
         console.log("post: /api/users/:_id/exercises");
-        res.json({ exercise });
+        res.json({ _id: user[0]._id, username: exercise.username, description: exercise.description, duration: exercise.duration, date: exercise.date.toDateString() });
       }
 
       if (logs.length >= 1) {
@@ -114,7 +122,7 @@ app
         )
         console.log("update: exer added to log");
         console.log("post: update log /api/users/:_id/exercises");
-        res.json({ user: exercise });
+        res.json({ _id: user[0]._id, username: exercise.username, description: exercise.description, duration: exercise.duration, date: exercise.date.toDateString() });
       }
 
 
@@ -128,44 +136,80 @@ app
     }
   })
 
+// formate date in yyyy-mm-dd
+// Format date in yyyy-mm-dd
+function formatDate(date = new Date()) {
+  const year = date.toLocaleString('default', { year: 'numeric' });
+  const month = date.toLocaleString('default', { month: '2-digit' });
+  const day = date.toLocaleString('default', { day: '2-digit' });
+  return [year, month, day].join('-');
+}
+
 app.get("/api/users/:_id/logs", async (req, res) => {
   const { _id } = req.params;
-  function formatDate(date = new Date()) {
-    const year = date.toLocaleString('default', { year: 'numeric' });
-    const month = date.toLocaleString('default', { month: '2-digit' });
-    const day = date.toLocaleString('default', { day: '2-digit' });
-    return [year, month, day].join('-');
-  }
-
-  let { from = "1990-01-01", to=formatDate(new Date()), limit } = req.query;
-
-  console.log(_id);
+  let { from = "1990-01-01", to = formatDate(new Date()), limit = 10 } = req.query;
 
   try {
-    // console.log(news)
-    from = new Date(from).toISOString();
-    to = new Date(to).toISOString();
-    const user = await User.find({ _id })
-    // use this for date
-    // date: {
-    // $gte: ISODate("2023-01-01T00:00:00.000Z"),
-    // $lte: ISODate("2023-12-31T23:59:59.999Z")
-    // }
+    // from = new Date(from);
+    // to = new Date(to);
+
+    const user = await User.findById(_id);
+
+    if (!user) {
+      return res.json({ msg: "No user found" });
+    }
+
+    console.log("user: ", user);
+    console.log("dates: ", from, to, limit);
+
+
+    // const logs = await Log.find({
+    //   username: user.username,
+    //   log: {
+    //     $elemMatch: {
+    //       date: {
+    //         $gte: new Date(from), // Greater than or equal to start date
+    //         $lte: new Date(to),   // Less than or equal to end date
+    //       }
+    //     }
+    //   }
+    // })
 
     const logs = await Log.find({
-      username: user[0].username, date: {
-        $gte: ISODate(from),
-        $lte: ISODate(to)
-      }
-    }).limit(limit);
-    console.log("get: /api/users/:_id/logs");
+      username: user.username,
+      'log.duration': { $gte: 41 }
+    })
+    // .then(posts => {
+    //   console.log('Posts between the specified dates:', posts);
+    // })
+    // .catch(err => {
+    //   console.error('Error fetching posts:', err);
+    // });
 
-    res.json({ count: logs[0].count, log: logs[0].log })
+    console.log('logs are: ', logs);
+    console.log('iso date', new Date(from), new Date(to))
+
+
+    if (logs.length > 0) {
+      let filteredLogs = logs[0].log
+        .filter(item => item.date >= new Date(from) && item.date <= new Date(to))
+        .map(item => ({
+          description: item.description,
+          duration: item.duration,
+          _id: item._id,
+          date: item.date.toDateString()
+        }))
+        .slice(0, limit)
+      res.json({ _id: user._id, username: user.username, count: logs[0].count, log: filteredLogs });
+    } else {
+      res.json({ msg: "Logs are empty" });
+    }
   } catch (error) {
-    console.log("get: err /api/users/:_id/logs");
-    res.json({ error })
+    console.log("get: err /api/users/:_id/logs", error);
+    res.json({ error, msg: "get: err /api/users/:_id/logs" });
   }
-})
+});
+
 
 app.post("/api/del", async (req, res) => {
   try {
